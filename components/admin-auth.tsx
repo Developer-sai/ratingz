@@ -13,6 +13,51 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Eye, EyeOff, Lock } from "lucide-react"
 
+interface DatabaseMovie {
+  id: string
+  title: string
+  year: number
+  poster_url: string
+  imdb_id: string
+  created_at: string
+}
+
+interface MovieWithStats extends DatabaseMovie {
+  ratingsCount: number
+  reactionsCount: number
+  averageRating: number
+}
+
+interface DatabaseRating {
+  id: string
+  movie_id: string
+  overall_rating: number | null
+  story_rating: number | null
+  screenplay_rating: number | null
+  direction_rating: number | null
+  performance_rating: number | null
+  music_rating: number | null
+  device_id: string
+  user_ip: string
+  created_at: string
+}
+
+interface DatabaseReaction {
+  id: string
+  movie_id: string
+  reaction_type: string
+  device_id: string
+  user_ip: string
+  created_at: string
+}
+
+interface AdminStats {
+  totalMovies: number
+  totalRatings: number
+  totalReactions: number
+  averageRating: number
+}
+
 const ADMIN_CREDENTIALS = {
   username: "sai",
   password: "Sai@123987",
@@ -25,8 +70,8 @@ export function AdminAuth() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
-  const [movies, setMovies] = useState([])
-  const [stats, setStats] = useState({
+  const [movies, setMovies] = useState<MovieWithStats[]>([])
+  const [stats, setStats] = useState<AdminStats>({
     totalMovies: 0,
     totalRatings: 0,
     totalReactions: 0,
@@ -46,33 +91,49 @@ export function AdminAuth() {
     const supabase = createClient()
 
     // Fetch all movies with their statistics
-    const { data: moviesData } = await supabase.from("movies").select("*").order("created_at", { ascending: false })
+    const { data: moviesData } = await supabase
+      .from("movies")
+      .select("*")
+      .order("created_at", { ascending: false })
 
     // Get overall statistics
     const { data: allRatings } = await supabase.from("ratings").select("*")
     const { data: allReactions } = await supabase.from("reactions").select("*")
 
-    const statsData = {
-      totalMovies: moviesData?.length || 0,
-      totalRatings: allRatings?.length || 0,
-      totalReactions: allReactions?.length || 0,
-      averageRating: allRatings?.length
-        ? allRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / allRatings.length
+    const typedMovies = (moviesData || []) as DatabaseMovie[]
+    const typedRatings = (allRatings || []) as DatabaseRating[]
+    const typedReactions = (allReactions || []) as DatabaseReaction[]
+
+    const statsData: AdminStats = {
+      totalMovies: typedMovies.length,
+      totalRatings: typedRatings.length,
+      totalReactions: typedReactions.length,
+      averageRating: typedRatings.length
+        ? typedRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / typedRatings.length
         : 0,
     }
 
     // Calculate individual movie stats
-    const moviesWithStats = await Promise.all(
-      (moviesData || []).map(async (movie) => {
-        const { data: ratings } = await supabase.from("ratings").select("*").eq("movie_id", movie.id)
-        const { data: reactions } = await supabase.from("reactions").select("*").eq("movie_id", movie.id)
+    const moviesWithStats: MovieWithStats[] = await Promise.all(
+      typedMovies.map(async (movie) => {
+        const { data: ratings } = await supabase
+          .from("ratings")
+          .select("*")
+          .eq("movie_id", movie.id)
+        const { data: reactions } = await supabase
+          .from("reactions")
+          .select("*")
+          .eq("movie_id", movie.id)
+
+        const typedMovieRatings = (ratings || []) as DatabaseRating[]
+        const typedMovieReactions = (reactions || []) as DatabaseReaction[]
 
         return {
           ...movie,
-          ratingsCount: ratings?.length || 0,
-          reactionsCount: reactions?.length || 0,
-          averageRating: ratings?.length
-            ? ratings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / ratings.length
+          ratingsCount: typedMovieRatings.length,
+          reactionsCount: typedMovieReactions.length,
+          averageRating: typedMovieRatings.length
+            ? typedMovieRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / typedMovieRatings.length
             : 0,
         }
       }),

@@ -15,6 +15,28 @@ import { Plus, Edit, Trash2, BarChart3, Film, Users, ThumbsUp, TrendingUp } from
 import { StarRating } from "@/components/star-rating"
 import { AdminAnalytics } from "@/components/admin-analytics"
 
+interface DatabaseMovie {
+  id: string
+  title: string
+  year: number
+  poster_url: string
+  imdb_id: string
+  created_at: string
+}
+
+interface DatabaseRating {
+  id: string
+  movie_id: string
+  overall_rating: number
+  created_at: string
+}
+
+interface DatabaseReaction {
+  id: string
+  movie_id: string
+  created_at: string
+}
+
 interface Movie {
   id: string
   title: string
@@ -51,17 +73,20 @@ export function AdminDashboard({ movies: initialMovies, stats }: AdminDashboardP
   const refreshMovies = async () => {
     const { data } = await supabase.from("movies").select("*").order("created_at", { ascending: false })
     if (data) {
+      const typedMovies = data as DatabaseMovie[]
       const moviesWithStats = await Promise.all(
-        data.map(async (movie) => {
+        typedMovies.map(async (movie) => {
           const { data: ratings } = await supabase.from("ratings").select("*").eq("movie_id", movie.id)
           const { data: reactions } = await supabase.from("reactions").select("*").eq("movie_id", movie.id)
+          const typedRatings = ratings as DatabaseRating[] | null
+          const typedReactions = reactions as DatabaseReaction[] | null
 
           return {
             ...movie,
-            ratingsCount: ratings?.length || 0,
-            reactionsCount: reactions?.length || 0,
-            averageRating: ratings?.length
-              ? ratings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / ratings.length
+            ratingsCount: typedRatings?.length || 0,
+            reactionsCount: typedReactions?.length || 0,
+            averageRating: typedRatings?.length
+              ? typedRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / typedRatings.length
               : 0,
           }
         }),
@@ -204,7 +229,11 @@ export function AdminDashboard({ movies: initialMovies, stats }: AdminDashboardP
                     </TableCell>
                     <TableCell>{movie.year}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{movie.imdb_id}</Badge>
+                      {movie.imdb_id ? (
+                        <Badge variant="outline">{movie.imdb_id}</Badge>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">No IMDB ID</span>
+                      )}
                     </TableCell>
                     <TableCell>{movie.ratingsCount}</TableCell>
                     <TableCell>
@@ -272,8 +301,24 @@ function MovieForm({ movie, onSuccess }: MovieFormProps) {
   })
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string>(movie?.poster_url || "")
 
   const supabase = createClient()
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setSelectedFile(file)
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const result = e.target?.result as string
+        setPreviewUrl(result)
+        setFormData({ ...formData, poster_url: result })
+      }
+      reader.readAsDataURL(file)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -294,7 +339,7 @@ function MovieForm({ movie, onSuccess }: MovieFormProps) {
           title: formData.title.trim(),
           year: formData.year,
           poster_url: formData.poster_url.trim() || null,
-          imdb_id: formData.imdb_id.trim(),
+          imdb_id: formData.imdb_id.trim() || null,
         }
 
         console.log("[v0] Inserting movie data:", movieData)
@@ -347,24 +392,32 @@ function MovieForm({ movie, onSuccess }: MovieFormProps) {
       </div>
 
       <div>
-        <Label htmlFor="poster_url">Poster URL</Label>
+        <Label htmlFor="poster_file">Movie Poster</Label>
         <Input
-          id="poster_url"
-          type="url"
-          value={formData.poster_url}
-          onChange={(e) => setFormData({ ...formData, poster_url: e.target.value })}
-          placeholder="https://example.com/poster.jpg (optional)"
+          id="poster_file"
+          type="file"
+          accept="image/*"
+          onChange={handleFileChange}
+          className="mb-2"
         />
+        {previewUrl && (
+          <div className="mt-2">
+            <img
+              src={previewUrl}
+              alt="Poster preview"
+              className="w-20 h-28 object-cover rounded border"
+            />
+          </div>
+        )}
       </div>
 
       <div>
-        <Label htmlFor="imdb_id">IMDB ID *</Label>
+        <Label htmlFor="imdb_id">IMDB ID</Label>
         <Input
           id="imdb_id"
           value={formData.imdb_id}
           onChange={(e) => setFormData({ ...formData, imdb_id: e.target.value })}
-          placeholder="tt0111161"
-          required
+          placeholder="tt0111161 (optional)"
           pattern="tt\d{7,8}"
           title="IMDB ID should start with 'tt' followed by 7-8 digits"
         />

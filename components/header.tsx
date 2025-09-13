@@ -2,8 +2,19 @@
 
 import Link from "next/link"
 import { Film } from "lucide-react"
+import { useState, useEffect } from "react"
 
 export function Header() {
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [isMounted, setIsMounted] = useState(false)
+
+  useEffect(() => {
+    setIsMounted(true)
+    // Check if user is authenticated as admin
+    const authStatus = sessionStorage.getItem("admin_authenticated")
+    setIsAdmin(authStatus === "true")
+  }, [])
+
   return (
     <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto px-4 py-4">
@@ -17,9 +28,11 @@ export function Header() {
             <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors">
               Movies
             </Link>
-            <Link href="/admin" className="text-muted-foreground hover:text-foreground transition-colors">
-              Admin
-            </Link>
+            {isMounted && isAdmin && (
+              <Link href="/admin" className="text-muted-foreground hover:text-foreground transition-colors">
+                Admin
+              </Link>
+            )}
           </nav>
         </div>
       </div>

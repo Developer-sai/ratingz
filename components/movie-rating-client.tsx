@@ -2,13 +2,32 @@
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { getDeviceId } from "@/lib/device-id"
+import { getDeviceId, getUserIP, getNetworkFingerprint } from "@/lib/device-id"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { StarRating } from "@/components/star-rating"
 import { RatingDistributionChart } from "@/components/rating-distribution-chart"
 import { CategoryRatingsChart } from "@/components/category-ratings-chart"
 import { ThumbsUp, ThumbsDown, Share2, BarChart3 } from "lucide-react"
+
+interface DatabaseRating {
+  id: string
+  movie_id: string
+  overall_rating: number
+  story_rating: number
+  screenplay_rating: number
+  direction_rating: number
+  performance_rating: number
+  music_rating: number
+  created_at: string
+}
+
+interface DatabaseReaction {
+  id: string
+  movie_id: string
+  reaction_type: string
+  created_at: string
+}
 
 interface Movie {
   id: string
@@ -37,44 +56,56 @@ interface MovieRatingClientProps {
 
 export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProps) {
   const [stats, setStats] = useState(initialStats)
-  const [userRating, setUserRating] = useState<any>(null)
+  const [userRating, setUserRating] = useState<UserRating | null>(null)
   const [userReaction, setUserReaction] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [deviceId, setDeviceId] = useState("")
+  const [userIP, setUserIP] = useState("")
+  const [networkFingerprint, setNetworkFingerprint] = useState("")
   const [ratingDistribution, setRatingDistribution] = useState<number[]>([0, 0, 0, 0, 0])
-  const [categoryData, setCategoryData] = useState<any[]>([])
+  const [categoryData, setCategoryData] = useState<{category: string, average: number, count: number}[]>([])
   const [showAnalytics, setShowAnalytics] = useState(false)
 
   const supabase = createClient()
 
   useEffect(() => {
-    const id = getDeviceId()
-    setDeviceId(id)
-    fetchUserData(id)
-    fetchAnalyticsData()
-  }, [])
+    const initializeDevice = async () => {
+      const id = getDeviceId()
+      const ip = await getUserIP()
+      const fingerprint = getNetworkFingerprint()
+      
+      setDeviceId(id)
+      setUserIP(ip)
+      setNetworkFingerprint(fingerprint)
+      
+      await fetchUserData(id, ip)
+      await fetchAnalyticsData()
+    }
 
-  const fetchUserData = async (deviceId: string) => {
-    const { data: rating } = await supabase
+    initializeDevice()
+  }, [movie.id])
+
+  const fetchUserData = async (deviceId: string, ip?: string) => {
+    const { data: existingRating } = await supabase
       .from("ratings")
       .select("*")
       .eq("movie_id", movie.id)
       .eq("device_id", deviceId)
       .single()
 
-    if (rating) {
-      setUserRating(rating)
+    if (existingRating) {
+      setUserRating(existingRating)
     }
 
-    const { data: reaction } = await supabase
+    const { data: existingReaction } = await supabase
       .from("reactions")
       .select("*")
       .eq("movie_id", movie.id)
       .eq("device_id", deviceId)
       .single()
 
-    if (reaction) {
-      setUserReaction(reaction.reaction_type)
+    if (existingReaction) {
+      setUserReaction(existingReaction.reaction_type)
     }
   }
 
@@ -82,8 +113,9 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
     const { data: ratings } = await supabase.from("ratings").select("*").eq("movie_id", movie.id)
 
     if (ratings) {
+      const typedRatings = ratings as DatabaseRating[]
       const distribution = [0, 0, 0, 0, 0]
-      ratings.forEach((rating) => {
+      typedRatings.forEach((rating: DatabaseRating) => {
         const overallRating = Math.floor(rating.overall_rating || 0)
         if (overallRating >= 1 && overallRating <= 5) {
           distribution[overallRating - 1]++
@@ -92,17 +124,17 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
       setRatingDistribution(distribution)
 
       const categories = [
-        { name: "Story", key: "story_rating" },
-        { name: "Screenplay", key: "screenplay_rating" },
-        { name: "Direction", key: "direction_rating" },
-        { name: "Performance", key: "performance_rating" },
-        { name: "Music", key: "music_rating" },
+        { name: "Story", key: "story_rating" as keyof DatabaseRating },
+        { name: "Screenplay", key: "screenplay_rating" as keyof DatabaseRating },
+        { name: "Direction", key: "direction_rating" as keyof DatabaseRating },
+        { name: "Performance", key: "performance_rating" as keyof DatabaseRating },
+        { name: "Music", key: "music_rating" as keyof DatabaseRating },
       ]
 
       const categoryStats = categories.map((category) => {
-        const validRatings = ratings.filter((r) => r[category.key] !== null)
+        const validRatings = typedRatings.filter((r: DatabaseRating) => r[category.key] !== null)
         const average = validRatings.length
-          ? validRatings.reduce((sum, r) => sum + r[category.key], 0) / validRatings.length
+          ? validRatings.reduce((sum, r: DatabaseRating) => sum + (r[category.key] as number), 0) / validRatings.length
           : 0
         return {
           category: category.name,
@@ -115,7 +147,7 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
     }
   }
 
-  const handleRatingSubmit = async (ratings: any) => {
+  const handleRatingSubmit = async (ratings: RatingSubmission) => {
     if (!deviceId) return
     setIsLoading(true)
 
@@ -123,6 +155,8 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
       const ratingData = {
         movie_id: movie.id,
         device_id: deviceId,
+        ip_address: userIP,
+        network_fingerprint: networkFingerprint,
         overall_rating: ratings.overall,
         story_rating: ratings.story || null,
         screenplay_rating: ratings.screenplay || null,
@@ -158,6 +192,8 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
         await supabase.from("reactions").upsert({
           movie_id: movie.id,
           device_id: deviceId,
+          ip_address: userIP,
+          network_fingerprint: networkFingerprint,
           reaction_type: reactionType,
         })
         setUserReaction(reactionType)
@@ -173,36 +209,38 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
 
   const refreshStats = async () => {
     const { data: ratings } = await supabase.from("ratings").select("*").eq("movie_id", movie.id)
+    const typedRatings = ratings as DatabaseRating[] | null
 
     const { data: reactions } = await supabase.from("reactions").select("*").eq("movie_id", movie.id)
+    const typedReactions = reactions as DatabaseReaction[] | null
 
     const newStats = {
-      totalRatings: ratings?.length || 0,
-      averageOverall: ratings?.length
-        ? ratings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / ratings.length
+      totalRatings: typedRatings?.length || 0,
+      averageOverall: typedRatings?.length
+        ? typedRatings.reduce((sum, r: DatabaseRating) => sum + (r.overall_rating || 0), 0) / typedRatings.length
         : 0,
-      averageStory: ratings?.filter((r) => r.story_rating).length
-        ? ratings.filter((r) => r.story_rating).reduce((sum, r) => sum + r.story_rating, 0) /
-          ratings.filter((r) => r.story_rating).length
+      averageStory: typedRatings?.filter((r: DatabaseRating) => r.story_rating).length
+        ? typedRatings.filter((r: DatabaseRating) => r.story_rating).reduce((sum, r: DatabaseRating) => sum + r.story_rating, 0) /
+          typedRatings.filter((r: DatabaseRating) => r.story_rating).length
         : 0,
-      averageScreenplay: ratings?.filter((r) => r.screenplay_rating).length
-        ? ratings.filter((r) => r.screenplay_rating).reduce((sum, r) => sum + r.screenplay_rating, 0) /
-          ratings.filter((r) => r.screenplay_rating).length
+      averageScreenplay: typedRatings?.filter((r: DatabaseRating) => r.screenplay_rating).length
+        ? typedRatings.filter((r: DatabaseRating) => r.screenplay_rating).reduce((sum, r: DatabaseRating) => sum + r.screenplay_rating, 0) /
+          typedRatings.filter((r: DatabaseRating) => r.screenplay_rating).length
         : 0,
-      averageDirection: ratings?.filter((r) => r.direction_rating).length
-        ? ratings.filter((r) => r.direction_rating).reduce((sum, r) => sum + r.direction_rating, 0) /
-          ratings.filter((r) => r.direction_rating).length
+      averageDirection: typedRatings?.filter((r: DatabaseRating) => r.direction_rating).length
+        ? typedRatings.filter((r: DatabaseRating) => r.direction_rating).reduce((sum, r: DatabaseRating) => sum + r.direction_rating, 0) /
+          typedRatings.filter((r: DatabaseRating) => r.direction_rating).length
         : 0,
-      averagePerformance: ratings?.filter((r) => r.performance_rating).length
-        ? ratings.filter((r) => r.performance_rating).reduce((sum, r) => sum + r.performance_rating, 0) /
-          ratings.filter((r) => r.performance_rating).length
+      averagePerformance: typedRatings?.filter((r: DatabaseRating) => r.performance_rating).length
+        ? typedRatings.filter((r: DatabaseRating) => r.performance_rating).reduce((sum, r: DatabaseRating) => sum + r.performance_rating, 0) /
+          typedRatings.filter((r: DatabaseRating) => r.performance_rating).length
         : 0,
-      averageMusic: ratings?.filter((r) => r.music_rating).length
-        ? ratings.filter((r) => r.music_rating).reduce((sum, r) => sum + r.music_rating, 0) /
-          ratings.filter((r) => r.music_rating).length
+      averageMusic: typedRatings?.filter((r: DatabaseRating) => r.music_rating).length
+        ? typedRatings.filter((r: DatabaseRating) => r.music_rating).reduce((sum, r: DatabaseRating) => sum + r.music_rating, 0) /
+          typedRatings.filter((r: DatabaseRating) => r.music_rating).length
         : 0,
-      thumbsUp: reactions?.filter((r) => r.reaction_type === "thumbs_up").length || 0,
-      thumbsDown: reactions?.filter((r) => r.reaction_type === "thumbs_down").length || 0,
+      thumbsUp: typedReactions?.filter((r: DatabaseReaction) => r.reaction_type === "thumbs_up").length || 0,
+      thumbsDown: typedReactions?.filter((r: DatabaseReaction) => r.reaction_type === "thumbs_down").length || 0,
     }
 
     setStats(newStats)
@@ -337,9 +375,28 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
   )
 }
 
+interface UserRating {
+  id?: string
+  overall_rating?: number
+  story_rating?: number
+  screenplay_rating?: number
+  direction_rating?: number
+  performance_rating?: number
+  music_rating?: number
+}
+
+interface RatingSubmission {
+  overall: number
+  story: number
+  screenplay: number
+  direction: number
+  performance: number
+  music: number
+}
+
 interface RatingFormProps {
-  userRating: any
-  onSubmit: (ratings: any) => void
+  userRating: UserRating | null
+  onSubmit: (ratings: RatingSubmission) => void
   isLoading: boolean
 }
 

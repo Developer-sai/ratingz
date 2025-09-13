@@ -17,14 +17,14 @@ interface AdminAnalyticsProps {
 }
 
 export function AdminAnalytics({ movies }: AdminAnalyticsProps) {
-  // Top rated movies
+  // Top rated movies (only movies with at least 3 ratings for statistical significance)
   const topRatedMovies = movies
-    .filter((movie) => movie.ratingsCount > 0)
+    .filter((movie) => movie.ratingsCount >= 3)
     .sort((a, b) => b.averageRating - a.averageRating)
     .slice(0, 5)
     .map((movie) => ({
       title: movie.title.length > 20 ? movie.title.substring(0, 20) + "..." : movie.title,
-      rating: movie.averageRating,
+      rating: Number(movie.averageRating.toFixed(2)),
       count: movie.ratingsCount,
     }))
 
@@ -53,7 +53,7 @@ export function AdminAnalytics({ movies }: AdminAnalyticsProps) {
     .map(([decade, count]) => ({ decade, count }))
     .sort((a, b) => a.decade.localeCompare(b.decade))
 
-  // Rating distribution across all movies
+  // Rating distribution across all movies (only movies with ratings)
   const ratingRanges = [
     { range: "4.5-5.0", min: 4.5, max: 5.0, color: "#22c55e" },
     { range: "4.0-4.4", min: 4.0, max: 4.4, color: "#84cc16" },
@@ -62,13 +62,14 @@ export function AdminAnalytics({ movies }: AdminAnalyticsProps) {
     { range: "0-2.9", min: 0, max: 2.9, color: "#ef4444" },
   ]
 
+  const moviesWithRatings = movies.filter(movie => movie.ratingsCount > 0)
   const ratingDistribution = ratingRanges.map((range) => ({
     range: range.range,
-    count: movies.filter(
-      (movie) => movie.ratingsCount > 0 && movie.averageRating >= range.min && movie.averageRating <= range.max,
+    count: moviesWithRatings.filter(
+      (movie) => movie.averageRating >= range.min && movie.averageRating <= range.max,
     ).length,
     color: range.color,
-  }))
+  })).filter(item => item.count > 0)
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -133,7 +134,10 @@ export function AdminAnalytics({ movies }: AdminAnalyticsProps) {
                 cy="50%"
                 outerRadius={80}
                 dataKey="count"
-                label={({ range, count }) => (count > 0 ? `${range}: ${count}` : "")}
+                label={(props: any) => {
+                  const { range, count } = props
+                  return count > 0 ? `${range}: ${count}` : ""
+                }}
               >
                 {ratingDistribution.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.color} />

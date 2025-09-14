@@ -42,11 +42,11 @@ export function HomePageClient({ initialMovies }: HomePageClientProps) {
 
   return (
     <>
-      <HomepageAnalytics movies={initialMovies} />
-      
       <SearchBar onSearch={handleSearch} searchQuery={searchQuery} />
       
       <MovieGrid movies={filteredMovies} />
+      
+      <HomepageAnalytics movies={initialMovies} />
       
       {searchQuery && filteredMovies.length === 0 && (
         <div className="text-center py-12">

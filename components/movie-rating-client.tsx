@@ -155,7 +155,7 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
       const ratingData = {
         movie_id: movie.id,
         device_id: deviceId,
-        ip_address: userIP,
+        user_ip: userIP,
         network_fingerprint: networkFingerprint,
         overall_rating: ratings.overall,
         story_rating: ratings.story || null,
@@ -192,7 +192,7 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
         await supabase.from("reactions").upsert({
           movie_id: movie.id,
           device_id: deviceId,
-          ip_address: userIP,
+          user_ip: userIP,
           network_fingerprint: networkFingerprint,
           reaction_type: reactionType,
         })

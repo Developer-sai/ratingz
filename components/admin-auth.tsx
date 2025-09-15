@@ -104,16 +104,20 @@ export function AdminAuth() {
     const typedRatings = (allRatings || []) as DatabaseRating[]
     const typedReactions = (allReactions || []) as DatabaseReaction[]
 
+    // Calculate proper overall average rating
+    const validOverallRatings = typedRatings.filter(r => r.overall_rating !== null && r.overall_rating > 0)
+    const overallAverage = validOverallRatings.length > 0
+      ? validOverallRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / validOverallRatings.length
+      : 0
+
     const statsData: AdminStats = {
       totalMovies: typedMovies.length,
       totalRatings: typedRatings.length,
       totalReactions: typedReactions.length,
-      averageRating: typedRatings.length
-        ? typedRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / typedRatings.length
-        : 0,
+      averageRating: Number(overallAverage.toFixed(2)),
     }
 
-    // Calculate individual movie stats
+    // Calculate individual movie stats with proper average calculation
     const moviesWithStats: MovieWithStats[] = await Promise.all(
       typedMovies.map(async (movie) => {
         const { data: ratings } = await supabase
@@ -128,13 +132,17 @@ export function AdminAuth() {
         const typedMovieRatings = (ratings || []) as DatabaseRating[]
         const typedMovieReactions = (reactions || []) as DatabaseReaction[]
 
+        // Calculate proper movie average rating
+        const validMovieRatings = typedMovieRatings.filter(r => r.overall_rating !== null && r.overall_rating > 0)
+        const movieAverage = validMovieRatings.length > 0
+          ? validMovieRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / validMovieRatings.length
+          : 0
+
         return {
           ...movie,
           ratingsCount: typedMovieRatings.length,
           reactionsCount: typedMovieReactions.length,
-          averageRating: typedMovieRatings.length
-            ? typedMovieRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / typedMovieRatings.length
-            : 0,
+          averageRating: Number(movieAverage.toFixed(2)),
         }
       }),
     )

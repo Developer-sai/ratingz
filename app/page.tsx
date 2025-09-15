@@ -33,7 +33,7 @@ export default async function HomePage() {
   const { data: moviesData } = await supabase
     .from("movies")
     .select("*")
-    .order("title")
+    .order("title", { ascending: true })
 
   const typedMovies = (moviesData || []) as DatabaseMovie[]
 

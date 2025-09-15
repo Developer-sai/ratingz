@@ -10,13 +10,14 @@ export async function createClient() {
     // Return a mock client that won't cause crashes
     return {
       from: () => ({
-        select: () => ({ data: [], error: null }),
+        select: () => ({
+          eq: () => ({ data: [], error: null }),
+          order: () => ({ data: [], error: null }),
+          single: () => ({ data: null, error: { message: 'Supabase not configured' } })
+        }),
         insert: () => ({ data: null, error: { message: 'Supabase not configured' } }),
         update: () => ({ data: null, error: { message: 'Supabase not configured' } }),
-        delete: () => ({ data: null, error: { message: 'Supabase not configured' } }),
-        eq: () => ({ data: [], error: null }),
-        single: () => ({ data: null, error: { message: 'Supabase not configured' } }),
-        order: () => ({ data: [], error: null })
+        delete: () => ({ data: null, error: { message: 'Supabase not configured' } })
       })
     } as any
   }

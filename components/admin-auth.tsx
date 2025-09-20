@@ -55,7 +55,6 @@ interface AdminStats {
   totalMovies: number
   totalRatings: number
   totalReactions: number
-  averageRating: number
 }
 
 const ADMIN_CREDENTIALS = {
@@ -75,7 +74,6 @@ export function AdminAuth() {
     totalMovies: 0,
     totalRatings: 0,
     totalReactions: 0,
-    averageRating: 0,
   })
 
   useEffect(() => {
@@ -88,67 +86,73 @@ export function AdminAuth() {
   }, [])
 
   const loadDashboardData = async () => {
-    const supabase = createClient()
+    try {
+      const supabase = createClient()
 
-    // Fetch all movies with their statistics
-    const { data: moviesData } = await supabase
-      .from("movies")
-      .select("*")
-      .order("created_at", { ascending: false })
+      // Fetch all movies with their statistics
+      const { data: moviesData, error: moviesError } = await supabase
+        .from("movies")
+        .select("*")
+        .order("created_at", { ascending: false })
 
-    // Get overall statistics
-    const { data: allRatings } = await supabase.from("ratings").select("*")
-    const { data: allReactions } = await supabase.from("reactions").select("*")
+      if (moviesError) {
+        console.error("Error fetching movies:", moviesError)
+        return
+      }
 
-    const typedMovies = (moviesData || []) as DatabaseMovie[]
-    const typedRatings = (allRatings || []) as DatabaseRating[]
-    const typedReactions = (allReactions || []) as DatabaseReaction[]
+      // Get overall statistics
+      const { data: allRatings } = await supabase.from("ratings").select("*")
+      const { data: allReactions } = await supabase.from("reactions").select("*")
 
-    // Calculate proper overall average rating
-    const validOverallRatings = typedRatings.filter(r => r.overall_rating !== null && r.overall_rating > 0)
-    const overallAverage = validOverallRatings.length > 0
-      ? validOverallRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / validOverallRatings.length
-      : 0
+      const typedMovies = (moviesData || []) as DatabaseMovie[]
+      const typedRatings = (allRatings || []) as DatabaseRating[]
+      const typedReactions = (allReactions || []) as DatabaseReaction[]
 
-    const statsData: AdminStats = {
-      totalMovies: typedMovies.length,
-      totalRatings: typedRatings.length,
-      totalReactions: typedReactions.length,
-      averageRating: Number(overallAverage.toFixed(2)),
+      console.log("Loaded movies:", typedMovies.length)
+      console.log("Movies data:", typedMovies)
+
+      const statsData: AdminStats = {
+        totalMovies: typedMovies.length,
+        totalRatings: typedRatings.length,
+        totalReactions: typedReactions.length,
+      }
+
+      // Calculate individual movie stats with proper average calculation
+      const moviesWithStats: MovieWithStats[] = await Promise.all(
+        typedMovies.map(async (movie) => {
+          const { data: ratings } = await supabase
+            .from("ratings")
+            .select("*")
+            .eq("movie_id", movie.id)
+          const { data: reactions } = await supabase
+            .from("reactions")
+            .select("*")
+            .eq("movie_id", movie.id)
+
+          const typedMovieRatings = (ratings || []) as DatabaseRating[]
+          const typedMovieReactions = (reactions || []) as DatabaseReaction[]
+
+          // Calculate proper movie average rating
+          const validMovieRatings = typedMovieRatings.filter(r => r.overall_rating !== null && r.overall_rating > 0)
+          const movieAverage = validMovieRatings.length > 0
+            ? validMovieRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / validMovieRatings.length
+            : 0
+
+          return {
+            ...movie,
+            ratingsCount: typedMovieRatings.length,
+            reactionsCount: typedMovieReactions.length,
+            averageRating: Number(movieAverage.toFixed(2)),
+          }
+        }),
+      )
+
+      console.log("Movies with stats:", moviesWithStats)
+      setMovies(moviesWithStats)
+      setStats(statsData)
+    } catch (error) {
+      console.error("Error loading dashboard data:", error)
     }
-
-    // Calculate individual movie stats with proper average calculation
-    const moviesWithStats: MovieWithStats[] = await Promise.all(
-      typedMovies.map(async (movie) => {
-        const { data: ratings } = await supabase
-          .from("ratings")
-          .select("*")
-          .eq("movie_id", movie.id)
-        const { data: reactions } = await supabase
-          .from("reactions")
-          .select("*")
-          .eq("movie_id", movie.id)
-
-        const typedMovieRatings = (ratings || []) as DatabaseRating[]
-        const typedMovieReactions = (reactions || []) as DatabaseReaction[]
-
-        // Calculate proper movie average rating
-        const validMovieRatings = typedMovieRatings.filter(r => r.overall_rating !== null && r.overall_rating > 0)
-        const movieAverage = validMovieRatings.length > 0
-          ? validMovieRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / validMovieRatings.length
-          : 0
-
-        return {
-          ...movie,
-          ratingsCount: typedMovieRatings.length,
-          reactionsCount: typedMovieReactions.length,
-          averageRating: Number(movieAverage.toFixed(2)),
-        }
-      }),
-    )
-
-    setMovies(moviesWithStats)
-    setStats(statsData)
   }
 
   const handleLogin = async (e: React.FormEvent) => {

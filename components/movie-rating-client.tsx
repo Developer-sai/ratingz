@@ -161,6 +161,12 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
       return
     }
     
+    // Check if user already has a rating - prevent updates
+    if (userRating?.id) {
+      alert("You have already rated this movie. Ratings cannot be changed once submitted.")
+      return
+    }
+    
     setIsLoading(true)
 
     try {
@@ -177,21 +183,11 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
         music_rating: ratings.music,
       }
 
-      let result
-      if (userRating?.id) {
-        // Update existing rating
-        result = await supabase
-          .from("ratings")
-          .update(ratingData)
-          .eq("id", userRating.id)
-          .select()
-      } else {
-        // Insert new rating
-        result = await supabase
-          .from("ratings")
-          .insert(ratingData)
-          .select()
-      }
+      // Only allow new ratings, no updates
+      const result = await supabase
+        .from("ratings")
+        .insert(ratingData)
+        .select()
 
       if (result.error) {
         if (result.error.code === '23505') { // Unique constraint violation
@@ -201,7 +197,7 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
         throw result.error
       }
 
-      // Update local state with the new/updated rating
+      // Update local state with the new rating
       if (result.data && result.data[0]) {
         setUserRating(result.data[0])
       }
@@ -209,7 +205,7 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
       await refreshStats()
       await fetchAnalyticsData()
       
-      alert(userRating?.id ? "Rating updated successfully!" : "Rating submitted successfully!")
+      alert("Rating submitted successfully! Thank you for your feedback.")
     } catch (error) {
       console.error("Error submitting rating:", error)
       alert("Failed to submit rating. Please try again.")
@@ -224,41 +220,41 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
       return
     }
     
+    // Check if user already has any reaction - prevent any changes
+    if (userReaction) {
+      alert("You have already reacted to this movie. Reactions cannot be changed once submitted.")
+      return
+    }
+    
     setIsLoading(true)
 
     try {
-      if (userReaction === reactionType) {
-        // Remove existing reaction
-        const { error } = await supabase
-          .from("reactions")
-          .delete()
-          .eq("movie_id", movie.id)
-          .eq("device_id", deviceId)
-          .eq("user_ip", userIP)
-        
-        if (error) throw error
-        setUserReaction(null)
-      } else {
-        // Add or update reaction
-        const reactionData = {
-          movie_id: movie.id,
-          device_id: deviceId,
-          user_ip: userIP,
-          network_fingerprint: networkFingerprint,
-          reaction_type: reactionType,
-        }
-
-        const { error } = await supabase
-          .from("reactions")
-          .upsert(reactionData, {
-            onConflict: 'movie_id,device_id,user_ip'
-          })
-
-        if (error) throw error
-        setUserReaction(reactionType)
+      // Only allow new reactions, no updates or deletions
+      const reactionData = {
+        movie_id: movie.id,
+        device_id: deviceId,
+        user_ip: userIP,
+        network_fingerprint: networkFingerprint,
+        reaction_type: reactionType,
       }
 
+      const result = await supabase
+        .from("reactions")
+        .insert(reactionData)
+        .select()
+
+      if (result.error) {
+        if (result.error.code === '23505') { // Unique constraint violation
+          alert("You have already reacted to this movie. You can only react once per movie.")
+          return
+        }
+        throw result.error
+      }
+
+      setUserReaction(reactionType)
       await refreshStats()
+      
+      alert("Reaction submitted successfully! Thank you for your feedback.")
     } catch (error) {
       console.error("Error submitting reaction:", error)
       alert("Failed to submit reaction. Please try again.")
@@ -396,10 +392,12 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
                   <Button
                     variant={userReaction === "thumbs_up" ? "default" : "outline"}
                     onClick={() => handleReaction("thumbs_up")}
-                    disabled={isLoading}
+                    disabled={isLoading || !!userReaction}
                     className={`flex-1 h-12 text-lg transition-all duration-200 ${
                       userReaction === "thumbs_up" 
                         ? "bg-green-500 hover:bg-green-600 text-white shadow-lg" 
+                        : userReaction
+                        ? "opacity-50 cursor-not-allowed"
                         : "hover:bg-green-50 hover:border-green-300 hover:text-green-700"
                     }`}
                   >
@@ -409,10 +407,12 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
                   <Button
                     variant={userReaction === "thumbs_down" ? "default" : "outline"}
                     onClick={() => handleReaction("thumbs_down")}
-                    disabled={isLoading}
+                    disabled={isLoading || !!userReaction}
                     className={`flex-1 h-12 text-lg transition-all duration-200 ${
                       userReaction === "thumbs_down" 
                         ? "bg-red-500 hover:bg-red-600 text-white shadow-lg" 
+                        : userReaction
+                        ? "opacity-50 cursor-not-allowed"
                         : "hover:bg-red-50 hover:border-red-300 hover:text-red-700"
                     }`}
                   >
@@ -488,10 +488,10 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
         <Card className="border-0 shadow-2xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm">
           <CardHeader className="text-center pb-6">
             <CardTitle className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
-              {userRating ? "Update Your Rating" : "Rate This Movie"}
+              {userRating ? "Your Rating" : "Rate This Movie"}
             </CardTitle>
             <p className="text-muted-foreground text-lg">
-              {userRating ? "Modify your existing rating" : "Share your thoughts and help others discover great movies"}
+              {userRating ? "Thank you for rating this movie! Ratings cannot be changed once submitted." : "Share your thoughts and help others discover great movies"}
             </p>
           </CardHeader>
           <CardContent>
@@ -576,7 +576,7 @@ function RatingForm({ userRating, onSubmit, isLoading }: RatingFormProps) {
           <StarRating
             value={ratings.overall}
             onChange={(value) => setRatings({ ...ratings, overall: value })}
-            size="xl"
+            size="lg"
           />
         </div>
         {ratings.overall > 0 && (

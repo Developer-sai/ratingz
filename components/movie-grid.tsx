@@ -42,8 +42,8 @@ export function MovieGrid({ movies }: MovieGridProps) {
 function MovieCard({ movie }: { movie: Movie }) {
   return (
     <Link href={`/movie/${movie.id}`}>
-      <Card className="group hover:shadow-lg transition-all duration-200 hover:scale-105 cursor-pointer">
-        <CardContent className="p-0">
+      <Card className="group hover:shadow-lg transition-all duration-200 hover:scale-105 cursor-pointer h-full flex flex-col">
+        <CardContent className="p-0 flex flex-col h-full">
           <div className="aspect-[3/4] relative overflow-hidden rounded-t-lg">
             <img
               src={movie.poster_url || "/placeholder.svg?height=400&width=300&query=movie poster"}
@@ -59,16 +59,16 @@ function MovieCard({ movie }: { movie: Movie }) {
             )}
           </div>
 
-          <div className="p-4 space-y-3">
+          <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
             <div>
-              <h3 className="font-semibold text-lg leading-tight text-balance group-hover:text-primary transition-colors">
+              <h3 className="font-semibold text-lg leading-tight text-balance group-hover:text-primary transition-colors line-clamp-2">
                 {movie.title}
               </h3>
               <p className="text-muted-foreground text-sm">{movie.year}</p>
             </div>
 
             {movie.totalRatings > 0 ? (
-              <div className="space-y-2">
+              <div className="space-y-2 mt-auto">
                 <div className="flex items-center gap-2">
                   <StarRating value={movie.averageRating} readonly size="sm" />
                   <span className="text-sm text-muted-foreground">({movie.totalRatings})</span>
@@ -86,7 +86,7 @@ function MovieCard({ movie }: { movie: Movie }) {
                 </div>
               </div>
             ) : (
-              <div className="text-sm text-muted-foreground">No ratings yet - be the first!</div>
+              <div className="text-sm text-muted-foreground mt-auto">No ratings yet - be the first!</div>
             )}
           </div>
         </CardContent>

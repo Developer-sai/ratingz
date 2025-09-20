@@ -9,6 +9,11 @@ export async function createClient() {
     console.warn('Supabase URL and/or API key not configured. Please check your environment variables.')
     // Return a mock client that won't cause crashes
     return {
+      auth: {
+        getUser: () => ({ data: { user: null }, error: null }),
+        signInWithOAuth: () => ({ data: null, error: { message: 'Supabase not configured' } }),
+        signOut: () => ({ error: null })
+      },
       from: () => ({
         select: () => ({
           eq: () => ({ data: [], error: null }),

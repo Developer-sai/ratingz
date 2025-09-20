@@ -4,6 +4,7 @@ import Link from "next/link"
 import { Card, CardContent } from "@/components/ui/card"
 import { StarRating } from "@/components/star-rating"
 import { ThumbsUp, ThumbsDown } from "lucide-react"
+import { User } from "@supabase/supabase-js"
 
 interface Movie {
   id: string
@@ -19,9 +20,10 @@ interface Movie {
 
 interface MovieGridProps {
   movies: Movie[]
+  user: User | null
 }
 
-export function MovieGrid({ movies }: MovieGridProps) {
+export function MovieGrid({ movies, user }: MovieGridProps) {
   if (!movies.length) {
     return (
       <div className="text-center py-12">
@@ -33,13 +35,13 @@ export function MovieGrid({ movies }: MovieGridProps) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
       {movies.map((movie) => (
-        <MovieCard key={movie.id} movie={movie} />
+        <MovieCard key={movie.id} movie={movie} user={user} />
       ))}
     </div>
   )
 }
 
-function MovieCard({ movie }: { movie: Movie }) {
+function MovieCard({ movie, user }: { movie: Movie; user: User | null }) {
   return (
     <Link href={`/movie/${movie.id}`}>
       <Card className="group hover:shadow-lg transition-all duration-200 hover:scale-105 cursor-pointer">

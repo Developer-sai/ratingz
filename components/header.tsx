@@ -3,8 +3,14 @@
 import Link from "next/link"
 import { Film } from "lucide-react"
 import { useState, useEffect } from "react"
+import { AuthButton, UserAvatar } from "@/components/auth-button"
+import { User } from "@supabase/supabase-js"
 
-export function Header() {
+interface HeaderProps {
+  user: User | null
+}
+
+export function Header({ user }: HeaderProps) {
   const [isAdmin, setIsAdmin] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
 
@@ -24,15 +30,27 @@ export function Header() {
             <span>Ratingz.fun</span>
           </Link>
 
-          <nav className="hidden md:flex items-center gap-6">
-            <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors">
-              Movies
-            </Link>
-            {isMounted && isAdmin && (
-              <Link href="/admin" className="text-muted-foreground hover:text-foreground transition-colors">
-                Admin
+          <nav className="flex items-center gap-6">
+            <div className="hidden md:flex items-center gap-6">
+              <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors">
+                Movies
               </Link>
-            )}
+              {user && (
+                <Link href="/profile" className="text-muted-foreground hover:text-foreground transition-colors">
+                  My Profile
+                </Link>
+              )}
+              {isMounted && isAdmin && (
+                <Link href="/admin" className="text-muted-foreground hover:text-foreground transition-colors">
+                  Admin
+                </Link>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-3">
+              {user && <UserAvatar user={user} />}
+              <AuthButton user={user} variant="outline" />
+            </div>
           </nav>
         </div>
       </div>

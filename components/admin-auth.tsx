@@ -31,23 +31,21 @@ interface MovieWithStats extends DatabaseMovie {
 interface DatabaseRating {
   id: string
   movie_id: string
+  user_id: string
   overall_rating: number | null
   story_rating: number | null
   screenplay_rating: number | null
   direction_rating: number | null
   performance_rating: number | null
   music_rating: number | null
-  device_id: string
-  user_ip: string
   created_at: string
 }
 
 interface DatabaseReaction {
   id: string
   movie_id: string
+  user_id: string
   reaction_type: string
-  device_id: string
-  user_ip: string
   created_at: string
 }
 
@@ -100,55 +98,41 @@ export function AdminAuth() {
     const { data: allRatings } = await supabase.from("ratings").select("*")
     const { data: allReactions } = await supabase.from("reactions").select("*")
 
-    const typedMovies = (moviesData || []) as DatabaseMovie[]
     const typedRatings = (allRatings || []) as DatabaseRating[]
     const typedReactions = (allReactions || []) as DatabaseReaction[]
 
-    // Calculate proper overall average rating
-    const validOverallRatings = typedRatings.filter(r => r.overall_rating !== null && r.overall_rating > 0)
-    const overallAverage = validOverallRatings.length > 0
-      ? validOverallRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / validOverallRatings.length
-      : 0
+    // Calculate stats for each movie
+    const moviesWithStats: MovieWithStats[] = (moviesData || []).map((movie) => {
+      const movieRatings = typedRatings.filter((r) => r.movie_id === movie.id)
+      const movieReactions = typedReactions.filter((r) => r.movie_id === movie.id)
+      
+      const averageRating = movieRatings.length > 0
+        ? movieRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / movieRatings.length
+        : 0
 
-    const statsData: AdminStats = {
-      totalMovies: typedMovies.length,
-      totalRatings: typedRatings.length,
-      totalReactions: typedReactions.length,
-      averageRating: Number(overallAverage.toFixed(2)),
-    }
-
-    // Calculate individual movie stats with proper average calculation
-    const moviesWithStats: MovieWithStats[] = await Promise.all(
-      typedMovies.map(async (movie) => {
-        const { data: ratings } = await supabase
-          .from("ratings")
-          .select("*")
-          .eq("movie_id", movie.id)
-        const { data: reactions } = await supabase
-          .from("reactions")
-          .select("*")
-          .eq("movie_id", movie.id)
-
-        const typedMovieRatings = (ratings || []) as DatabaseRating[]
-        const typedMovieReactions = (reactions || []) as DatabaseReaction[]
-
-        // Calculate proper movie average rating
-        const validMovieRatings = typedMovieRatings.filter(r => r.overall_rating !== null && r.overall_rating > 0)
-        const movieAverage = validMovieRatings.length > 0
-          ? validMovieRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / validMovieRatings.length
-          : 0
-
-        return {
-          ...movie,
-          ratingsCount: typedMovieRatings.length,
-          reactionsCount: typedMovieReactions.length,
-          averageRating: Number(movieAverage.toFixed(2)),
-        }
-      }),
-    )
+      return {
+        ...movie,
+        ratingsCount: movieRatings.length,
+        reactionsCount: movieReactions.length,
+        averageRating: Math.round(averageRating * 10) / 10,
+      }
+    })
 
     setMovies(moviesWithStats)
-    setStats(statsData)
+
+    // Calculate overall stats
+    const totalRatings = typedRatings.length
+    const totalReactions = typedReactions.length
+    const overallAverageRating = totalRatings > 0
+      ? typedRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / totalRatings
+      : 0
+
+    setStats({
+      totalMovies: moviesData?.length || 0,
+      totalRatings,
+      totalReactions,
+      averageRating: Math.round(overallAverageRating * 10) / 10,
+    })
   }
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -156,12 +140,12 @@ export function AdminAuth() {
     setLoading(true)
     setError("")
 
-    // Simulate a brief loading delay for better UX
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    // Simulate authentication delay
+    await new Promise((resolve) => setTimeout(resolve, 1000))
 
     if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
-      sessionStorage.setItem("admin_authenticated", "true")
       setIsAuthenticated(true)
+      sessionStorage.setItem("admin_authenticated", "true")
       await loadDashboardData()
     } else {
       setError("Invalid username or password")
@@ -171,85 +155,157 @@ export function AdminAuth() {
   }
 
   const handleLogout = () => {
-    sessionStorage.removeItem("admin_authenticated")
     setIsAuthenticated(false)
+    sessionStorage.removeItem("admin_authenticated")
     setUsername("")
     setPassword("")
+    setError("")
   }
 
-  if (isAuthenticated) {
+  const handleDeleteMovie = async (movieId: string) => {
+    const supabase = createClient()
+    
+    try {
+      // Delete all ratings for this movie
+      await supabase.from("ratings").delete().eq("movie_id", movieId)
+      
+      // Delete all reactions for this movie
+      await supabase.from("reactions").delete().eq("movie_id", movieId)
+      
+      // Delete the movie
+      const { error } = await supabase.from("movies").delete().eq("id", movieId)
+      
+      if (error) throw error
+      
+      // Reload data
+      await loadDashboardData()
+    } catch (error) {
+      console.error("Error deleting movie:", error)
+      alert("Failed to delete movie. Please try again.")
+    }
+  }
+
+  const handleAddMovie = async (movieData: {
+    title: string
+    year: number
+    poster_url: string
+    imdb_id: string
+  }) => {
+    const supabase = createClient()
+    
+    try {
+      const { error } = await supabase.from("movies").insert([movieData])
+      
+      if (error) throw error
+      
+      // Reload data
+      await loadDashboardData()
+    } catch (error) {
+      console.error("Error adding movie:", error)
+      alert("Failed to add movie. Please try again.")
+    }
+  }
+
+  if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-background">
-        <Header />
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex justify-between items-center mb-6">
-            <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-            <Button variant="outline" onClick={handleLogout}>
-              Logout
-            </Button>
-          </div>
-          <AdminDashboard movies={movies} stats={stats} />
-        </div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md shadow-2xl border-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm">
+          <CardHeader className="text-center space-y-4">
+            <div className="mx-auto w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center">
+              <Lock className="w-8 h-8 text-white" />
+            </div>
+            <CardTitle className="text-2xl font-bold bg-gradient-to-r from-slate-900 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
+              Admin Access
+            </CardTitle>
+            <CardDescription className="text-base">
+              Enter your credentials to access the admin dashboard
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleLogin} className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="username" className="text-sm font-medium">
+                  Username
+                </Label>
+                <Input
+                  id="username"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Enter username"
+                  required
+                  className="h-12 text-base"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-sm font-medium">
+                  Password
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter password"
+                    required
+                    className="h-12 text-base pr-12"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 hover:bg-transparent"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-4 h-4 text-muted-foreground" />
+                    ) : (
+                      <Eye className="w-4 h-4 text-muted-foreground" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              <Button
+                type="submit"
+                disabled={loading}
+                className="w-full h-12 text-base font-semibold bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all duration-200"
+              >
+                {loading ? (
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Authenticating...
+                  </div>
+                ) : (
+                  "Sign In"
+                )}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-            <Lock className="h-6 w-6 text-primary" />
-          </div>
-          <CardTitle className="text-2xl">Admin Login</CardTitle>
-          <CardDescription>Enter your credentials to access the admin dashboard</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
-              <Input
-                id="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter username"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter password"
-                  required
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-            </div>
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Signing in..." : "Sign In"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+    <div className="min-h-screen bg-background">
+      <Header />
+      <AdminDashboard
+        movies={movies}
+        stats={stats}
+        onDeleteMovie={handleDeleteMovie}
+        onAddMovie={handleAddMovie}
+        onLogout={handleLogout}
+        onRefresh={loadDashboardData}
+      />
     </div>
   )
 }

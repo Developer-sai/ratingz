@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { Header } from "@/components/header"
 import { HomePageClient } from "@/components/homepage-client"
+import { getUser } from "@/lib/auth"
 
 interface DatabaseMovie {
   id: string
@@ -28,6 +29,7 @@ interface MovieWithStats extends DatabaseMovie {
 
 export default async function HomePage() {
   const supabase = await createClient()
+  const user = await getUser()
   
   // Fetch all movies with their rating statistics on the server
   const { data: moviesData } = await supabase
@@ -73,7 +75,7 @@ export default async function HomePage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      <Header user={user} />
       <main className="container mx-auto px-4 py-8">
         <div className="text-center mb-12">
           <h1 className="text-4xl md:text-6xl font-bold text-balance mb-4">
@@ -82,11 +84,14 @@ export default async function HomePage() {
             <span className="text-primary">Share Opinions.</span>
           </h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto text-pretty">
-            Discover and rate your favorite movies. No login required - just honest ratings from real movie lovers.
+            {user 
+              ? "Discover and rate your favorite movies. Your ratings are saved to your profile."
+              : "Discover and rate your favorite movies. Sign in to save your ratings and build your profile."
+            }
           </p>
         </div>
         
-        <HomePageClient initialMovies={moviesWithStats} />
+        <HomePageClient initialMovies={moviesWithStats} user={user} />
       </main>
     </div>
   )

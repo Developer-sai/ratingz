@@ -2,17 +2,18 @@
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { getDeviceId, getUserIP, getNetworkFingerprint } from "@/lib/device-id"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { StarRating } from "@/components/star-rating"
 import { RatingDistributionChart } from "@/components/rating-distribution-chart"
 import { CategoryRatingsChart } from "@/components/category-ratings-chart"
-import { ThumbsUp, ThumbsDown, Share2, BarChart3 } from "lucide-react"
+import { ThumbsUp, ThumbsDown, Share2, BarChart3, LogIn } from "lucide-react"
+import { User } from "@supabase/supabase-js"
 
 interface DatabaseRating {
   id: string
   movie_id: string
+  user_id: string
   overall_rating: number
   story_rating: number
   screenplay_rating: number
@@ -25,6 +26,7 @@ interface DatabaseRating {
 interface DatabaseReaction {
   id: string
   movie_id: string
+  user_id: string
   reaction_type: string
   created_at: string
 }
@@ -59,9 +61,7 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
   const [userRating, setUserRating] = useState<UserRating | null>(null)
   const [userReaction, setUserReaction] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [deviceId, setDeviceId] = useState("")
-  const [userIP, setUserIP] = useState("")
-  const [networkFingerprint, setNetworkFingerprint] = useState("")
+  const [user, setUser] = useState<User | null>(null)
   const [ratingDistribution, setRatingDistribution] = useState<number[]>([0, 0, 0, 0, 0])
   const [categoryData, setCategoryData] = useState<{category: string, average: number, count: number}[]>([])
   const [showAnalytics, setShowAnalytics] = useState(false)
@@ -69,31 +69,40 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
   const supabase = createClient()
 
   useEffect(() => {
-    const initializeDevice = async () => {
-      const id = getDeviceId()
-      const ip = await getUserIP()
-      const fingerprint = getNetworkFingerprint()
+    const initializeAuth = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      setUser(user)
       
-      setDeviceId(id)
-      setUserIP(ip)
-      setNetworkFingerprint(fingerprint)
-      
-      await fetchUserData(id, ip)
+      if (user) {
+        await fetchUserData(user.id)
+      }
       await fetchAnalyticsData()
     }
 
-    initializeDevice()
+    initializeAuth()
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      setUser(session?.user ?? null)
+      if (session?.user) {
+        await fetchUserData(session.user.id)
+      } else {
+        setUserRating(null)
+        setUserReaction(null)
+      }
+    })
+
+    return () => subscription.unsubscribe()
   }, [movie.id])
 
-  const fetchUserData = async (deviceId: string, ip?: string) => {
+  const fetchUserData = async (userId: string) => {
     try {
-      // Check for existing rating using both device_id and user_ip for better restriction
+      // Check for existing rating
       const { data: existingRating } = await supabase
         .from("ratings")
         .select("*")
         .eq("movie_id", movie.id)
-        .eq("device_id", deviceId)
-        .eq("user_ip", ip || userIP)
+        .eq("user_id", userId)
         .single()
 
       if (existingRating) {
@@ -105,8 +114,7 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
         .from("reactions")
         .select("*")
         .eq("movie_id", movie.id)
-        .eq("device_id", deviceId)
-        .eq("user_ip", ip || userIP)
+        .eq("user_id", userId)
         .single()
 
       if (existingReaction) {
@@ -118,46 +126,120 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
   }
 
   const fetchAnalyticsData = async () => {
-    const { data: ratings } = await supabase.from("ratings").select("*").eq("movie_id", movie.id)
+    try {
+      // Fetch rating distribution
+      const { data: ratings } = await supabase
+        .from("ratings")
+        .select("overall_rating")
+        .eq("movie_id", movie.id)
 
-    if (ratings) {
-      const typedRatings = ratings as DatabaseRating[]
-      const distribution = [0, 0, 0, 0, 0]
-      typedRatings.forEach((rating: DatabaseRating) => {
-        const overallRating = Math.floor(rating.overall_rating || 0)
-        if (overallRating >= 1 && overallRating <= 5) {
-          distribution[overallRating - 1]++
-        }
-      })
-      setRatingDistribution(distribution)
+      if (ratings) {
+        const distribution = [0, 0, 0, 0, 0]
+        ratings.forEach((rating) => {
+          const ratingValue = Math.floor(rating.overall_rating)
+          if (ratingValue >= 1 && ratingValue <= 5) {
+            distribution[ratingValue - 1]++
+          }
+        })
+        setRatingDistribution(distribution)
+      }
 
-      const categories = [
-        { name: "Story", key: "story_rating" as keyof DatabaseRating },
-        { name: "Screenplay", key: "screenplay_rating" as keyof DatabaseRating },
-        { name: "Direction", key: "direction_rating" as keyof DatabaseRating },
-        { name: "Performance", key: "performance_rating" as keyof DatabaseRating },
-        { name: "Music", key: "music_rating" as keyof DatabaseRating },
-      ]
+      // Fetch category averages
+      const { data: categoryRatings } = await supabase
+        .from("ratings")
+        .select("story_rating, screenplay_rating, direction_rating, performance_rating, music_rating")
+        .eq("movie_id", movie.id)
 
-      const categoryStats = categories.map((category) => {
-        const validRatings = typedRatings.filter((r: DatabaseRating) => r[category.key] !== null)
-        const average = validRatings.length
-          ? validRatings.reduce((sum, r: DatabaseRating) => sum + (r[category.key] as number), 0) / validRatings.length
+      if (categoryRatings && categoryRatings.length > 0) {
+        const categories = [
+          { name: "Story", key: "story_rating" },
+          { name: "Screenplay", key: "screenplay_rating" },
+          { name: "Direction", key: "direction_rating" },
+          { name: "Performance", key: "performance_rating" },
+          { name: "Music", key: "music_rating" },
+        ]
+
+        const categoryData = categories.map((category) => {
+          const values = categoryRatings
+            .map((r) => r[category.key as keyof typeof r])
+            .filter((v) => v !== null) as number[]
+          
+          const average = values.length > 0 
+            ? values.reduce((sum, val) => sum + val, 0) / values.length 
+            : 0
+          
+          return {
+            category: category.name,
+            average: Math.round(average * 10) / 10,
+            count: values.length,
+          }
+        })
+
+        setCategoryData(categoryData)
+      }
+    } catch (error) {
+      console.error("Error fetching analytics data:", error)
+    }
+  }
+
+  const refreshStats = async () => {
+    try {
+      const { data: ratings } = await supabase
+        .from("ratings")
+        .select("overall_rating, story_rating, screenplay_rating, direction_rating, performance_rating, music_rating")
+        .eq("movie_id", movie.id)
+
+      const { data: reactions } = await supabase
+        .from("reactions")
+        .select("reaction_type")
+        .eq("movie_id", movie.id)
+
+      if (ratings) {
+        const totalRatings = ratings.length
+        const averageOverall = totalRatings > 0 
+          ? ratings.reduce((sum, r) => sum + r.overall_rating, 0) / totalRatings 
           : 0
-        return {
-          category: category.name,
-          average: Number(average.toFixed(1)),
-          count: validRatings.length,
-        }
-      })
+        const averageStory = totalRatings > 0 
+          ? ratings.reduce((sum, r) => sum + r.story_rating, 0) / totalRatings 
+          : 0
+        const averageScreenplay = totalRatings > 0 
+          ? ratings.reduce((sum, r) => sum + r.screenplay_rating, 0) / totalRatings 
+          : 0
+        const averageDirection = totalRatings > 0 
+          ? ratings.reduce((sum, r) => sum + r.direction_rating, 0) / totalRatings 
+          : 0
+        const averagePerformance = totalRatings > 0 
+          ? ratings.reduce((sum, r) => sum + r.performance_rating, 0) / totalRatings 
+          : 0
+        const averageMusic = totalRatings > 0 
+          ? ratings.reduce((sum, r) => sum + r.music_rating, 0) / totalRatings 
+          : 0
 
-      setCategoryData(categoryStats)
+        const thumbsUp = reactions?.filter(r => r.reaction_type === "thumbs_up").length || 0
+        const thumbsDown = reactions?.filter(r => r.reaction_type === "thumbs_down").length || 0
+
+        setStats({
+          totalRatings,
+          averageOverall: Math.round(averageOverall * 10) / 10,
+          averageStory: Math.round(averageStory * 10) / 10,
+          averageScreenplay: Math.round(averageScreenplay * 10) / 10,
+          averageDirection: Math.round(averageDirection * 10) / 10,
+          averagePerformance: Math.round(averagePerformance * 10) / 10,
+          averageMusic: Math.round(averageMusic * 10) / 10,
+          thumbsUp,
+          thumbsDown,
+        })
+      }
+
+      await fetchAnalyticsData()
+    } catch (error) {
+      console.error("Error refreshing stats:", error)
     }
   }
 
   const handleRatingSubmit = async (ratings: RatingSubmission) => {
-    if (!deviceId || !userIP) {
-      alert("Unable to submit rating. Please refresh the page and try again.")
+    if (!user) {
+      alert("Please sign in to submit a rating.")
       return
     }
     
@@ -166,9 +248,7 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
     try {
       const ratingData = {
         movie_id: movie.id,
-        device_id: deviceId,
-        user_ip: userIP,
-        network_fingerprint: networkFingerprint,
+        user_id: user.id,
         overall_rating: ratings.overall,
         story_rating: ratings.story,
         screenplay_rating: ratings.screenplay,
@@ -207,8 +287,6 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
       }
 
       await refreshStats()
-      await fetchAnalyticsData()
-      
       alert(userRating?.id ? "Rating updated successfully!" : "Rating submitted successfully!")
     } catch (error) {
       console.error("Error submitting rating:", error)
@@ -219,8 +297,8 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
   }
 
   const handleReaction = async (reactionType: "thumbs_up" | "thumbs_down") => {
-    if (!deviceId || !userIP) {
-      alert("Unable to submit reaction. Please refresh the page and try again.")
+    if (!user) {
+      alert("Please sign in to react to this movie.")
       return
     }
     
@@ -233,8 +311,7 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
           .from("reactions")
           .delete()
           .eq("movie_id", movie.id)
-          .eq("device_id", deviceId)
-          .eq("user_ip", userIP)
+          .eq("user_id", user.id)
         
         if (error) throw error
         setUserReaction(null)
@@ -242,16 +319,14 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
         // Add or update reaction
         const reactionData = {
           movie_id: movie.id,
-          device_id: deviceId,
-          user_ip: userIP,
-          network_fingerprint: networkFingerprint,
+          user_id: user.id,
           reaction_type: reactionType,
         }
 
         const { error } = await supabase
           .from("reactions")
           .upsert(reactionData, {
-            onConflict: 'movie_id,device_id,user_ip'
+            onConflict: 'movie_id,user_id'
           })
 
         if (error) throw error
@@ -267,238 +342,241 @@ export function MovieRatingClient({ movie, initialStats }: MovieRatingClientProp
     }
   }
 
-  const refreshStats = async () => {
-    const { data: ratings } = await supabase.from("ratings").select("*").eq("movie_id", movie.id)
-    const typedRatings = ratings as DatabaseRating[] | null
-
-    const { data: reactions } = await supabase.from("reactions").select("*").eq("movie_id", movie.id)
-    const typedReactions = reactions as DatabaseReaction[] | null
-
-    // Helper function to calculate average for a specific rating type
-    const calculateAverage = (ratingKey: keyof DatabaseRating) => {
-      if (!typedRatings || typedRatings.length === 0) return 0
-      const validRatings = typedRatings.filter((r: DatabaseRating) => 
-        r[ratingKey] !== null && r[ratingKey] !== undefined && (r[ratingKey] as number) > 0
-      )
-      if (validRatings.length === 0) return 0
-      const sum = validRatings.reduce((acc, r: DatabaseRating) => acc + (r[ratingKey] as number), 0)
-      return Number((sum / validRatings.length).toFixed(2))
+  const handleGoogleSignIn = async () => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/movie/${movie.id}`
+        }
+      })
+      if (error) throw error
+    } catch (error) {
+      console.error("Error signing in with Google:", error)
+      alert("Failed to sign in with Google. Please try again.")
     }
+  }
 
-    const newStats = {
-      totalRatings: typedRatings?.length || 0,
-      averageOverall: calculateAverage('overall_rating'),
-      averageStory: calculateAverage('story_rating'),
-      averageScreenplay: calculateAverage('screenplay_rating'),
-      averageDirection: calculateAverage('direction_rating'),
-      averagePerformance: calculateAverage('performance_rating'),
-      averageMusic: calculateAverage('music_rating'),
-      thumbsUp: typedReactions?.filter((r: DatabaseReaction) => r.reaction_type === "thumbs_up").length || 0,
-      thumbsDown: typedReactions?.filter((r: DatabaseReaction) => r.reaction_type === "thumbs_down").length || 0,
+  const handleSignOut = async () => {
+    try {
+      const { error } = await supabase.auth.signOut()
+      if (error) throw error
+    } catch (error) {
+      console.error("Error signing out:", error)
     }
-
-    setStats(newStats)
-    await fetchAnalyticsData()
   }
 
   const shareMovie = async () => {
     if (navigator.share) {
-      await navigator.share({
-        title: `Rate ${movie.title} on Ratingz.fun`,
-        url: window.location.href,
-      })
+      try {
+        await navigator.share({
+          title: `${movie.title} (${movie.year}) - Ratingz`,
+          text: `Check out the ratings for ${movie.title} on Ratingz!`,
+          url: window.location.href,
+        })
+      } catch (error) {
+        console.error("Error sharing:", error)
+      }
     } else {
-      await navigator.clipboard.writeText(window.location.href)
+      // Fallback to copying URL
+      navigator.clipboard.writeText(window.location.href)
+      alert("Movie URL copied to clipboard!")
     }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-      <div className="container mx-auto px-4 py-8 max-w-6xl">
-        {/* Hero Section */}
-        <div className="flex flex-col lg:flex-row gap-8 mb-12">
-          <div className="flex-shrink-0 lg:w-80">
-            <div className="relative group">
-              <img
-                src={movie.poster_url || "/placeholder.svg"}
-                alt={movie.title}
-                className="w-full h-[480px] object-cover rounded-2xl shadow-2xl mx-auto transition-transform duration-300 group-hover:scale-105"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+    <div className="container mx-auto px-4 py-8 max-w-4xl">
+      {/* Movie Header */}
+      <div className="flex flex-col md:flex-row gap-8 mb-8">
+        <div className="flex-shrink-0">
+          <img
+            src={movie.poster_url || "/placeholder.svg"}
+            alt={`${movie.title} poster`}
+            className="w-64 h-96 object-cover rounded-lg shadow-lg mx-auto md:mx-0"
+          />
+        </div>
+        
+        <div className="flex-1 space-y-6">
+          <div>
+            <h1 className="text-4xl font-bold mb-2">{movie.title}</h1>
+            <p className="text-xl text-muted-foreground mb-4">({movie.year})</p>
+            {movie.imdb_id && (
+              <a
+                href={`https://www.imdb.com/title/${movie.imdb_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:text-blue-800 underline"
+              >
+                View on IMDb
+              </a>
+            )}
+          </div>
+
+          {/* Stats Overview */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="text-center p-4 bg-muted rounded-lg">
+              <div className="text-2xl font-bold text-primary">{stats.averageOverall || "N/A"}</div>
+              <div className="text-sm text-muted-foreground">Overall Rating</div>
+            </div>
+            <div className="text-center p-4 bg-muted rounded-lg">
+              <div className="text-2xl font-bold text-primary">{stats.totalRatings}</div>
+              <div className="text-sm text-muted-foreground">Total Ratings</div>
+            </div>
+            <div className="text-center p-4 bg-muted rounded-lg">
+              <div className="text-2xl font-bold text-green-600">{stats.thumbsUp}</div>
+              <div className="text-sm text-muted-foreground">Thumbs Up</div>
+            </div>
+            <div className="text-center p-4 bg-muted rounded-lg">
+              <div className="text-2xl font-bold text-red-600">{stats.thumbsDown}</div>
+              <div className="text-sm text-muted-foreground">Thumbs Down</div>
             </div>
           </div>
 
-          <div className="flex-1 space-y-8">
-            <div className="space-y-4">
-              <h1 className="text-5xl lg:text-6xl font-bold bg-gradient-to-r from-slate-900 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent leading-tight">
-                {movie.title}
-              </h1>
-              <div className="flex items-center gap-4">
-                <span className="text-2xl font-semibold text-slate-600 dark:text-slate-400">{movie.year}</span>
-                {movie.imdb_id && (
-                  <a 
-                    href={`https://www.imdb.com/title/${movie.imdb_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-4 py-2 bg-yellow-500 text-black font-semibold rounded-lg hover:bg-yellow-400 transition-colors duration-200"
-                  >
-                    IMDb
-                  </a>
-                )}
+          {/* Action Buttons */}
+          <div className="flex flex-wrap gap-4">
+            <Button
+              onClick={() => handleReaction("thumbs_up")}
+              variant={userReaction === "thumbs_up" ? "default" : "outline"}
+              disabled={isLoading || !user}
+              className="flex items-center gap-2"
+            >
+              <ThumbsUp className="w-4 h-4" />
+              {userReaction === "thumbs_up" ? "Liked" : "Like"}
+            </Button>
+            
+            <Button
+              onClick={() => handleReaction("thumbs_down")}
+              variant={userReaction === "thumbs_down" ? "default" : "outline"}
+              disabled={isLoading || !user}
+              className="flex items-center gap-2"
+            >
+              <ThumbsDown className="w-4 h-4" />
+              {userReaction === "thumbs_down" ? "Disliked" : "Dislike"}
+            </Button>
+            
+            <Button onClick={shareMovie} variant="outline" className="flex items-center gap-2">
+              <Share2 className="w-4 h-4" />
+              Share
+            </Button>
+            
+            <Button
+              onClick={() => setShowAnalytics(!showAnalytics)}
+              variant="outline"
+              className="flex items-center gap-2"
+            >
+              <BarChart3 className="w-4 h-4" />
+              {showAnalytics ? "Hide" : "Show"} Analytics
+            </Button>
+          </div>
+
+          {/* Authentication Status */}
+          <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
+            {user ? (
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-3">
+                  {user.user_metadata?.avatar_url && (
+                    <img
+                      src={user.user_metadata.avatar_url}
+                      alt="Profile"
+                      className="w-8 h-8 rounded-full"
+                    />
+                  )}
+                  <div>
+                    <p className="font-medium">{user.user_metadata?.full_name || user.email}</p>
+                    <p className="text-sm text-muted-foreground">Signed in</p>
+                  </div>
+                </div>
+                <Button onClick={handleSignOut} variant="outline" size="sm">
+                  Sign Out
+                </Button>
               </div>
-            </div>
-
-            {/* Overall Rating Card */}
-            <Card className="border-0 shadow-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm">
-              <CardHeader className="pb-4">
-                <CardTitle className="flex items-center justify-between text-2xl">
-                  <span className="flex items-center gap-3">
-                    <div className="w-3 h-3 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full"></div>
-                    Overall Rating
-                  </span>
-                  <div className="flex gap-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => setShowAnalytics(!showAnalytics)}
-                      className="hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors duration-200"
-                    >
-                      <BarChart3 className="w-4 h-4 mr-2" />
-                      Analytics
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={shareMovie}
-                      className="hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors duration-200"
-                    >
-                      <Share2 className="w-4 h-4 mr-2" />
-                      Share
-                    </Button>
-                  </div>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="flex items-center gap-6">
-                  <div className="text-5xl font-bold bg-gradient-to-r from-yellow-500 to-orange-500 bg-clip-text text-transparent">
-                    {stats.averageOverall.toFixed(1)}
-                  </div>
-                  <div className="flex-1">
-                    <StarRating value={stats.averageOverall} readonly size="lg" />
-                    <div className="text-sm text-muted-foreground mt-1">
-                      Based on {stats.totalRatings} {stats.totalRatings === 1 ? 'rating' : 'ratings'}
-                    </div>
-                  </div>
+            ) : (
+              <div className="flex items-center justify-between w-full">
+                <div>
+                  <p className="font-medium">Sign in to rate and react</p>
+                  <p className="text-sm text-muted-foreground">Connect with Google to get started</p>
                 </div>
-
-                {/* Reaction Buttons */}
-                <div className="flex gap-4">
-                  <Button
-                    variant={userReaction === "thumbs_up" ? "default" : "outline"}
-                    onClick={() => handleReaction("thumbs_up")}
-                    disabled={isLoading}
-                    className={`flex-1 h-12 text-lg transition-all duration-200 ${
-                      userReaction === "thumbs_up" 
-                        ? "bg-green-500 hover:bg-green-600 text-white shadow-lg" 
-                        : "hover:bg-green-50 hover:border-green-300 hover:text-green-700"
-                    }`}
-                  >
-                    <ThumbsUp className="w-5 h-5 mr-2" />
-                    {stats.thumbsUp}
-                  </Button>
-                  <Button
-                    variant={userReaction === "thumbs_down" ? "default" : "outline"}
-                    onClick={() => handleReaction("thumbs_down")}
-                    disabled={isLoading}
-                    className={`flex-1 h-12 text-lg transition-all duration-200 ${
-                      userReaction === "thumbs_down" 
-                        ? "bg-red-500 hover:bg-red-600 text-white shadow-lg" 
-                        : "hover:bg-red-50 hover:border-red-300 hover:text-red-700"
-                    }`}
-                  >
-                    <ThumbsDown className="w-5 h-5 mr-2" />
-                    {stats.thumbsDown}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Category Ratings Preview */}
-            {stats.totalRatings > 0 && (
-              <Card className="border-0 shadow-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm">
-                <CardHeader>
-                  <CardTitle className="text-xl">Category Ratings</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                    {[
-                      { label: "Story", value: stats.averageStory, color: "from-blue-500 to-cyan-500" },
-                      { label: "Screenplay", value: stats.averageScreenplay, color: "from-purple-500 to-pink-500" },
-                      { label: "Direction", value: stats.averageDirection, color: "from-green-500 to-emerald-500" },
-                      { label: "Performance", value: stats.averagePerformance, color: "from-orange-500 to-red-500" },
-                      { label: "Music", value: stats.averageMusic, color: "from-indigo-500 to-purple-500" },
-                    ].map((category) => (
-                      <div key={category.label} className="text-center p-4 rounded-xl bg-slate-50 dark:bg-slate-700/50">
-                        <div className={`text-2xl font-bold bg-gradient-to-r ${category.color} bg-clip-text text-transparent`}>
-                          {category.value.toFixed(1)}
-                        </div>
-                        <div className="text-sm text-muted-foreground">{category.label}</div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+                <Button onClick={handleGoogleSignIn} className="flex items-center gap-2">
+                  <LogIn className="w-4 h-4" />
+                  Sign in with Google
+                </Button>
+              </div>
             )}
           </div>
         </div>
+      </div>
 
-        {/* Analytics Section */}
-        {showAnalytics && stats.totalRatings > 0 && (
-          <div className="space-y-8 mb-12">
-            <h2 className="text-3xl font-bold text-center">Detailed Analytics</h2>
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-              <Card className="border-0 shadow-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm">
-                <CardHeader>
-                  <CardTitle className="text-xl flex items-center gap-2">
-                    <div className="w-3 h-3 bg-gradient-to-r from-blue-400 to-purple-500 rounded-full"></div>
-                    Rating Distribution
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <RatingDistributionChart data={ratingDistribution} />
-                </CardContent>
-              </Card>
-
-              <Card className="border-0 shadow-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm">
-                <CardHeader>
-                  <CardTitle className="text-xl flex items-center gap-2">
-                    <div className="w-3 h-3 bg-gradient-to-r from-green-400 to-blue-500 rounded-full"></div>
-                    Category Breakdown
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <CategoryRatingsChart data={categoryData} />
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        )}
-
-        {/* Rating Form */}
-        <Card className="border-0 shadow-2xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm">
-          <CardHeader className="text-center pb-6">
-            <CardTitle className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
+      {/* Rating Form */}
+      {user && (
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>
               {userRating ? "Update Your Rating" : "Rate This Movie"}
             </CardTitle>
-            <p className="text-muted-foreground text-lg">
-              {userRating ? "Modify your existing rating" : "Share your thoughts and help others discover great movies"}
-            </p>
           </CardHeader>
           <CardContent>
-            <RatingForm userRating={userRating} onSubmit={handleRatingSubmit} isLoading={isLoading} />
+            <RatingForm
+              userRating={userRating}
+              onSubmit={handleRatingSubmit}
+              isLoading={isLoading}
+            />
           </CardContent>
         </Card>
-      </div>
+      )}
+
+      {/* Analytics */}
+      {showAnalytics && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          <Card>
+            <CardHeader>
+              <CardTitle>Rating Distribution</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <RatingDistributionChart data={ratingDistribution} />
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardHeader>
+              <CardTitle>Category Ratings</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CategoryRatingsChart data={categoryData} />
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Detailed Stats */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Detailed Ratings</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="text-center p-4 border rounded-lg">
+              <div className="text-lg font-semibold">{stats.averageStory || "N/A"}</div>
+              <div className="text-sm text-muted-foreground">Story</div>
+            </div>
+            <div className="text-center p-4 border rounded-lg">
+              <div className="text-lg font-semibold">{stats.averageScreenplay || "N/A"}</div>
+              <div className="text-sm text-muted-foreground">Screenplay</div>
+            </div>
+            <div className="text-center p-4 border rounded-lg">
+              <div className="text-lg font-semibold">{stats.averageDirection || "N/A"}</div>
+              <div className="text-sm text-muted-foreground">Direction</div>
+            </div>
+            <div className="text-center p-4 border rounded-lg">
+              <div className="text-lg font-semibold">{stats.averagePerformance || "N/A"}</div>
+              <div className="text-sm text-muted-foreground">Performance</div>
+            </div>
+            <div className="text-center p-4 border rounded-lg">
+              <div className="text-lg font-semibold">{stats.averageMusic || "N/A"}</div>
+              <div className="text-sm text-muted-foreground">Music</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -538,132 +616,79 @@ function RatingForm({ userRating, onSubmit, isLoading }: RatingFormProps) {
     music: userRating?.music_rating || 0,
   })
 
-  const handleSubmit = () => {
-    if (ratings.overall > 0) {
-      onSubmit(ratings)
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    // Validate that all ratings are provided
+    const ratingValues = Object.values(ratings)
+    if (ratingValues.some(rating => rating === 0)) {
+      alert("Please provide ratings for all categories.")
+      return
     }
+
+    onSubmit(ratings)
   }
 
-  const categoryIcons = {
-    story: "📖",
-    screenplay: "✍️", 
-    direction: "🎬",
-    performance: "🎭",
-    music: "🎵"
-  }
-
-  const categoryColors = {
-    story: "from-blue-500 to-cyan-500",
-    screenplay: "from-purple-500 to-pink-500",
-    direction: "from-green-500 to-emerald-500",
-    performance: "from-orange-500 to-red-500",
-    music: "from-indigo-500 to-purple-500"
+  const updateRating = (category: keyof typeof ratings, value: number) => {
+    setRatings(prev => ({ ...prev, [category]: value }))
   }
 
   return (
-    <div className="space-y-8">
-      {/* Overall Rating Section */}
-      <div className="text-center space-y-4 p-8 rounded-2xl bg-gradient-to-br from-yellow-50 to-orange-500 dark:from-yellow-900/20 dark:to-orange-900/20 border border-yellow-200 dark:border-yellow-800">
-        <div className="flex items-center justify-center gap-3 mb-4">
-          <div className="text-3xl">⭐</div>
-          <h3 className="text-2xl font-bold bg-gradient-to-r from-yellow-600 to-orange-600 bg-clip-text text-transparent">
-            Overall Rating
-          </h3>
-          <div className="text-3xl">⭐</div>
-        </div>
-        <p className="text-muted-foreground mb-6">How would you rate this movie overall?</p>
-        <div className="flex justify-center">
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Overall Rating</label>
           <StarRating
-            value={ratings.overall}
-            onChange={(value) => setRatings({ ...ratings, overall: value })}
-            size="xl"
+            rating={ratings.overall}
+            onRatingChange={(value) => updateRating("overall", value)}
+            size="lg"
           />
         </div>
-        {ratings.overall > 0 && (
-          <div className="text-lg font-semibold text-yellow-700 dark:text-yellow-300 animate-fade-in">
-            {ratings.overall === 5 ? "Masterpiece! 🏆" : 
-             ratings.overall >= 4 ? "Excellent! 👏" :
-             ratings.overall >= 3 ? "Good! 👍" :
-             ratings.overall >= 2 ? "Fair 👌" : "Poor 👎"}
-          </div>
-        )}
-      </div>
-
-      {/* Category Ratings */}
-      <div className="space-y-6">
-        <div className="text-center">
-          <h3 className="text-xl font-bold mb-2">Category Ratings</h3>
-          <p className="text-muted-foreground">Rate specific aspects (optional)</p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[
-            { key: "story", label: "Story", description: "Plot, narrative, and storytelling" },
-            { key: "screenplay", label: "Screenplay", description: "Dialogue and script quality" },
-            { key: "direction", label: "Direction", description: "Visual style and pacing" },
-            { key: "performance", label: "Performance", description: "Acting and character portrayal" },
-            { key: "music", label: "Music", description: "Soundtrack and score" },
-          ].map(({ key, label, description }) => (
-            <div 
-              key={key} 
-              className="group p-6 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:shadow-lg transition-all duration-300 hover:scale-105"
-            >
-              <div className="text-center space-y-4">
-                <div className="flex items-center justify-center gap-2">
-                  <span className="text-2xl">{categoryIcons[key as keyof typeof categoryIcons]}</span>
-                  <h4 className={`font-bold text-lg bg-gradient-to-r ${categoryColors[key as keyof typeof categoryColors]} bg-clip-text text-transparent`}>
-                    {label}
-                  </h4>
-                </div>
-                <p className="text-sm text-muted-foreground">{description}</p>
-                <div className="flex justify-center">
-                  <StarRating
-                    value={ratings[key as keyof typeof ratings]}
-                    onChange={(value) => setRatings({ ...ratings, [key]: value })}
-                    size="md"
-                  />
-                </div>
-                {ratings[key as keyof typeof ratings] > 0 && (
-                  <div className="text-sm font-medium text-slate-600 dark:text-slate-400 animate-fade-in">
-                    {ratings[key as keyof typeof ratings]}/5 stars
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Submit Button */}
-      <div className="text-center pt-6">
-        <Button 
-          onClick={handleSubmit} 
-          disabled={isLoading || ratings.overall === 0} 
-          className={`px-12 py-4 text-lg font-semibold rounded-xl transition-all duration-300 ${
-            ratings.overall === 0 
-              ? "bg-slate-300 text-slate-500 cursor-not-allowed" 
-              : "bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transform hover:scale-105"
-          }`}
-        >
-          {isLoading ? (
-            <div className="flex items-center gap-2">
-              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              Submitting...
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span>{userRating ? "Update Rating" : "Submit Rating"}</span>
-              <span className="text-xl">🚀</span>
-            </div>
-          )}
-        </Button>
         
-        {ratings.overall === 0 && (
-          <p className="text-sm text-muted-foreground mt-3 animate-pulse">
-            Please provide an overall rating to continue
-          </p>
-        )}
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Story</label>
+          <StarRating
+            rating={ratings.story}
+            onRatingChange={(value) => updateRating("story", value)}
+          />
+        </div>
+        
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Screenplay</label>
+          <StarRating
+            rating={ratings.screenplay}
+            onRatingChange={(value) => updateRating("screenplay", value)}
+          />
+        </div>
+        
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Direction</label>
+          <StarRating
+            rating={ratings.direction}
+            onRatingChange={(value) => updateRating("direction", value)}
+          />
+        </div>
+        
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Performance</label>
+          <StarRating
+            rating={ratings.performance}
+            onRatingChange={(value) => updateRating("performance", value)}
+          />
+        </div>
+        
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Music</label>
+          <StarRating
+            rating={ratings.music}
+            onRatingChange={(value) => updateRating("music", value)}
+          />
+        </div>
       </div>
-    </div>
+      
+      <Button type="submit" disabled={isLoading} className="w-full">
+        {isLoading ? "Submitting..." : userRating ? "Update Rating" : "Submit Rating"}
+      </Button>
+    </form>
   )
 }

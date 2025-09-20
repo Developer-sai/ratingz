@@ -4,6 +4,7 @@ import { MovieGrid } from "@/components/movie-grid"
 import { SearchBar } from "@/components/search-bar"
 import { HomepageAnalytics } from "@/components/homepage-analytics"
 import { useState } from "react"
+import { User } from "@supabase/supabase-js"
 
 interface Movie {
   id: string
@@ -19,9 +20,10 @@ interface Movie {
 
 interface HomePageClientProps {
   initialMovies: Movie[]
+  user: User | null
 }
 
-export function HomePageClient({ initialMovies }: HomePageClientProps) {
+export function HomePageClient({ initialMovies, user }: HomePageClientProps) {
   const [filteredMovies, setFilteredMovies] = useState(initialMovies)
   const [searchQuery, setSearchQuery] = useState("")
 
@@ -44,7 +46,7 @@ export function HomePageClient({ initialMovies }: HomePageClientProps) {
     <>
       <SearchBar onSearch={handleSearch} searchQuery={searchQuery} />
       
-      <MovieGrid movies={filteredMovies} />
+      <MovieGrid movies={filteredMovies} user={user} />
       
       <HomepageAnalytics movies={initialMovies} />
       

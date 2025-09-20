@@ -9,23 +9,21 @@ interface PageProps {
 interface DatabaseRating {
   id: string
   movie_id: string
+  user_id: string
   overall_rating: number | null
   story_rating: number | null
   screenplay_rating: number | null
   direction_rating: number | null
   performance_rating: number | null
   music_rating: number | null
-  device_id: string
-  user_ip: string
   created_at: string
 }
 
 interface DatabaseReaction {
   id: string
   movie_id: string
+  user_id: string
   reaction_type: string
-  device_id: string
-  user_ip: string
   created_at: string
 }
 
@@ -71,26 +69,28 @@ export default async function MoviePage({ params }: PageProps) {
 
   const ratingStats = {
     totalRatings: typedRatings.length,
-    averageOverall: typedRatings.length ? typedRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / typedRatings.length : 0,
+    averageOverall: typedRatings.length 
+      ? Math.round((typedRatings.reduce((sum, r) => sum + (r.overall_rating || 0), 0) / typedRatings.length) * 10) / 10
+      : 0,
     averageStory: typedRatings.filter((r) => r.story_rating !== null).length
-      ? typedRatings.filter((r) => r.story_rating !== null).reduce((sum, r) => sum + (r.story_rating || 0), 0) /
-        typedRatings.filter((r) => r.story_rating !== null).length
+      ? Math.round((typedRatings.filter((r) => r.story_rating !== null).reduce((sum, r) => sum + (r.story_rating || 0), 0) /
+        typedRatings.filter((r) => r.story_rating !== null).length) * 10) / 10
       : 0,
     averageScreenplay: typedRatings.filter((r) => r.screenplay_rating !== null).length
-      ? typedRatings.filter((r) => r.screenplay_rating !== null).reduce((sum, r) => sum + (r.screenplay_rating || 0), 0) /
-        typedRatings.filter((r) => r.screenplay_rating !== null).length
+      ? Math.round((typedRatings.filter((r) => r.screenplay_rating !== null).reduce((sum, r) => sum + (r.screenplay_rating || 0), 0) /
+        typedRatings.filter((r) => r.screenplay_rating !== null).length) * 10) / 10
       : 0,
     averageDirection: typedRatings.filter((r) => r.direction_rating !== null).length
-      ? typedRatings.filter((r) => r.direction_rating !== null).reduce((sum, r) => sum + (r.direction_rating || 0), 0) /
-        typedRatings.filter((r) => r.direction_rating !== null).length
+      ? Math.round((typedRatings.filter((r) => r.direction_rating !== null).reduce((sum, r) => sum + (r.direction_rating || 0), 0) /
+        typedRatings.filter((r) => r.direction_rating !== null).length) * 10) / 10
       : 0,
     averagePerformance: typedRatings.filter((r) => r.performance_rating !== null).length
-      ? typedRatings.filter((r) => r.performance_rating !== null).reduce((sum, r) => sum + (r.performance_rating || 0), 0) /
-        typedRatings.filter((r) => r.performance_rating !== null).length
+      ? Math.round((typedRatings.filter((r) => r.performance_rating !== null).reduce((sum, r) => sum + (r.performance_rating || 0), 0) /
+        typedRatings.filter((r) => r.performance_rating !== null).length) * 10) / 10
       : 0,
     averageMusic: typedRatings.filter((r) => r.music_rating !== null).length
-      ? typedRatings.filter((r) => r.music_rating !== null).reduce((sum, r) => sum + (r.music_rating || 0), 0) /
-        typedRatings.filter((r) => r.music_rating !== null).length
+      ? Math.round((typedRatings.filter((r) => r.music_rating !== null).reduce((sum, r) => sum + (r.music_rating || 0), 0) /
+        typedRatings.filter((r) => r.music_rating !== null).length) * 10) / 10
       : 0,
     thumbsUp: typedReactions.filter((r) => r.reaction_type === "thumbs_up").length,
     thumbsDown: typedReactions.filter((r) => r.reaction_type === "thumbs_down").length,

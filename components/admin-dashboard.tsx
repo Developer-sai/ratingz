@@ -343,7 +343,7 @@ function MovieForm({ movie, onSuccess }: MovieFormProps) {
         }
 
         console.log("[v0] Inserting movie data:", movieData)
-        const { data, error } = await supabase.from("movies").insert(movieData).select()
+        const { data, error } = await supabase.from("movies").insert([movieData]).select("*")
 
         if (error) {
           console.log("[v0] Insert error:", error)
